@@ -13,7 +13,6 @@
 #include <iostream>
 #include <sstream>
 
-
 #ifdef _WIN32
 #include <windows.h>
 #elif __APPLE__
@@ -35,12 +34,12 @@ struct values_vec
 	float Vt;
 };
 
-void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &hostSortID, thrust::host_vector<int> &hostKeyData,
-	vector<values_vec> &intermediate, vector<int> &intermediateKey, bool isBinary,
-	ofstream &finalOut, int &reducedRecs, bool isOptionA = false, string pathInter = "")
+void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<long long> &hostSortID, thrust::host_vector<long long> &hostKeyData,
+	vector<values_vec> &intermediate, vector<long long> &intermediateKey, bool isBinary,
+	ofstream &finalOut, long long &reducedRecs, bool isOptionA = false, string pathInter = "")
 {
 	ofstream intermediateOut;
-	vector<int> dataIds, keyIds;
+	vector<long long> dataIds, keyIds;
 	if (isOptionA){
 #ifdef _WIN32
 		string fileName = pathInter + string("\\intermediate1");
@@ -58,8 +57,8 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 	}
 	reducedRecs = 0;
 	// checking in treshold values
-	int N = hostData.size();
-	for (int j = 0; j < N; j++){
+	long long N = hostData.size();
+	for (long long j = 0; j < N; j++){
 		// Find number of records with same key
 		int sameKeys = 1;
 		while (j < N - 1){
@@ -67,7 +66,7 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 			else break;
 		}
 
-		int curID;
+		long long curID;
 		if (sameKeys == 1 && isOptionA){
 			curID = hostSortID[j];
 			if (!isBinary){
@@ -81,7 +80,7 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 		// calculate mean values of current same key records
 		values_vec meanVals;
 		meanVals.Vr = meanVals.Vs = meanVals.Vt = 0;
-		for (int i = j - sameKeys + 1; i <= j; i++){
+		for (long long i = j - sameKeys + 1; i <= j; i++){
 			curID = hostSortID[i];
 			meanVals.Vr += hostData[curID].Vr;
 			meanVals.Vs += hostData[curID].Vs;
@@ -94,7 +93,7 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 		// calculate standard deviations 
 		values_vec stdVals;
 		stdVals.Vr = stdVals.Vs = stdVals.Vt = 0;
-		for (int i = j - sameKeys + 1; i <= j; i++){
+		for (long long i = j - sameKeys + 1; i <= j; i++){
 			curID = hostSortID[i];
 			stdVals.Vr += (hostData[curID].Vr - meanVals.Vr) * (hostData[curID].Vr - meanVals.Vr);
 			stdVals.Vs += (hostData[curID].Vs - meanVals.Vs) * (hostData[curID].Vs - meanVals.Vs);
@@ -106,7 +105,7 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 
 		// checking treshold
 		bool inTresh = true;
-		for (int i = j - sameKeys + 1; i <= j; i++){
+		for (long long i = j - sameKeys + 1; i <= j; i++){
 			curID = hostSortID[i];
 			int z1 = (int) (fabsf(hostData[curID].Vr - meanVals.Vr) / stdVals.Vr + 0.5);
 			int z2 = (int) (fabsf(hostData[curID].Vs - meanVals.Vs) / stdVals.Vs + 0.5);
@@ -118,8 +117,8 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 		}
 		if (inTresh){
 			// write to intermediate data
-			int oldKey = hostKeyData[j - sameKeys + 1];
-			int curID = hostSortID[j - sameKeys + 1];
+			long long oldKey = hostKeyData[j - sameKeys + 1];
+			long long curID = hostSortID[j - sameKeys + 1];
 			meanVals.X = hostData[curID].X; meanVals.Y = hostData[curID].Y; meanVals.Z = hostData[curID].Z;
 			intermediate.push_back(meanVals);
 			intermediateKey.push_back(oldKey);
@@ -138,7 +137,7 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 			// write to final file
 			if (!isBinary){
 				ostringstream out;
-				for (int i = j - sameKeys + 1; i <= j; i++){
+				for (long long i = j - sameKeys + 1; i <= j; i++){
 					curID = hostSortID[i];
 					values_vec tmp = hostData[curID];
 					out << tmp.X << " " << tmp.Y << " " << tmp.Z << " ";
@@ -148,7 +147,7 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 				finalOut << out.str();
 			}
 			else{
-				for (int i = j - sameKeys + 1; i <= j; i++){
+				for (long long i = j - sameKeys + 1; i <= j; i++){
 					dataIds.push_back(hostSortID[i]);
 					keyIds.push_back(hostKeyData[i]);
 				}
@@ -159,37 +158,41 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 	if (isOptionA){
 		// write to binary files
 		if (isBinary){
-			int finalSz = dataIds.size();
-			int reduceSz = finalSz >> 3;
-			char *Buffer = new char[28 * reduceSz];
-			float *ptr = (float *) Buffer;
-			int counter = 0;
-			vector<int>::iterator itK = keyIds.begin();
-			for (int i = 0; i < finalSz; i++){
-				int curID = dataIds[i];
-				values_vec tmp = hostData[curID];
-				*(ptr++) = tmp.X; *(ptr++) = tmp.Y; *(ptr++) = tmp.Z;
-				*(ptr++) = *((float *) (&(*(itK++))));
-				*(ptr++) = tmp.Vr; *(ptr++) = tmp.Vs; *(ptr++) = tmp.Vt;
-				counter++;
-				if (counter % reduceSz == 0){
-					finalOut.write(Buffer, 28 * reduceSz);
-					ptr = (float *) Buffer;
+			long long finalSz = dataIds.size();
+			char *Buffer;
+			float *ptr;
+			long long reduceSz = finalSz >> 3; 
+			if (reduceSz){
+				Buffer = new char[28 * reduceSz];
+				ptr = (float *) Buffer;
+				long long counter = 0;
+				vector<long long>::iterator itK = keyIds.begin();
+				for (long long i = 0; i < finalSz; i++){
+					long long curID = dataIds[i];
+					values_vec tmp = hostData[curID];
+					*(ptr++) = tmp.X; *(ptr++) = tmp.Y; *(ptr++) = tmp.Z;
+					*(ptr++) = *((float *) (&(*(itK++))));
+					*(ptr++) = tmp.Vr; *(ptr++) = tmp.Vs; *(ptr++) = tmp.Vt;
+					counter++;
+					if (counter % reduceSz == 0){
+						finalOut.write(Buffer, 28 * reduceSz);
+						ptr = (float *) Buffer;
+					}
 				}
-			}
-			int remain = counter % reduceSz;
-			if (remain)finalOut.write(Buffer, 28 * remain);
+				long long remain = counter % reduceSz;
+				if (remain)finalOut.write(Buffer, 28 * remain);
 
-			delete [] Buffer;
+				delete [] Buffer;
+			}
 
 			// Intermediate
 			finalSz = intermediate.size();
 			Buffer = new char[32 * finalSz];
 			ptr = (float *) Buffer;
-			for (int i = 0; i < finalSz; i++){
+			for (long long i = 0; i < finalSz; i++){
 				values_vec tmp = intermediate[i];
 				*(ptr++) = tmp.X; *(ptr++) = tmp.Y; *(ptr++) = tmp.Z;
-				int newKey = intermediateKey[i] >> 3;
+				long long newKey = intermediateKey[i] >> 3;
 				*(ptr++) = *((float *) (&newKey));
 				*(ptr++) = tmp.Vr; *(ptr++) = tmp.Vs; *(ptr++) = tmp.Vt;
 				*(ptr++) = *((float *) (&intermediateKey[i]));
@@ -201,12 +204,12 @@ void FirstReductionStep(vector<values_vec> &hostData, thrust::host_vector<int> &
 	}
 }
 
-void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vector<int> &hostKeyData,
-	vector<values_vec> &intermediate, vector<int> &intermediateKey, bool isBinary,
-	ofstream &finalOut, int &reducedRecs, bool isOptionA = false, string pathInter = "")
+void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vector<long long> &hostKeyData,
+	vector<values_vec> &intermediate, vector<long long> &intermediateKey, bool isBinary,
+	ofstream &finalOut, long long &reducedRecs, bool isOptionA = false, string pathInter = "")
 {
 	reducedRecs = 0;
-	int N = hostData.size();
+	long long N = hostData.size();
 	if (N == 1 && isOptionA){
 		if (isBinary){
 			finalOut << hostData[0].X << hostData[0].Y << hostData[0].Z;
@@ -221,7 +224,7 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 	}
 
 	ofstream intermediateOut;
-	vector<int> finalIds;
+	vector<long long> finalIds;
 	if (isOptionA){
 		ostringstream filename;
 #ifdef _WIN32
@@ -241,7 +244,7 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 
 	// checking in treshold values
 	int shift = 3 * step + 3;
-	for (int j = 0; j < N; j++){
+	for (long long j = 0; j < N; j++){
 		// Find number of records with same key
 		int sameKeys = 1;
 		while (j < N - 1){
@@ -264,7 +267,7 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 		// calculate mean values of current same key records
 		values_vec meanVals;
 		meanVals.Vr = meanVals.Vs = meanVals.Vt = 0;
-		for (int i = j - sameKeys + 1; i <= j; i++){
+		for (long long i = j - sameKeys + 1; i <= j; i++){
 			meanVals.Vr += hostData[i].Vr;
 			meanVals.Vs += hostData[i].Vs;
 			meanVals.Vt += hostData[i].Vt;
@@ -276,7 +279,7 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 		// calculate standard deviations 
 		values_vec stdVals;
 		stdVals.Vr = stdVals.Vs = stdVals.Vt = 0;
-		for (int i = j - sameKeys + 1; i <= j; i++){
+		for (long long i = j - sameKeys + 1; i <= j; i++){
 			stdVals.Vr += (hostData[i].Vr - meanVals.Vr) * (hostData[i].Vr - meanVals.Vr);
 			stdVals.Vs += (hostData[i].Vs - meanVals.Vs) * (hostData[i].Vs - meanVals.Vs);
 			stdVals.Vt += (hostData[i].Vt - meanVals.Vt) * (hostData[i].Vt - meanVals.Vt);
@@ -287,7 +290,7 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 
 		// checking treshold
 		bool inTresh = true;
-		for (int i = j - sameKeys + 1; i <= j; i++){
+		for (long long i = j - sameKeys + 1; i <= j; i++){
 			int z1 = (int) (fabsf(hostData[i].Vr - meanVals.Vr) / stdVals.Vr + 0.5);
 			int z2 = (int) (fabsf(hostData[i].Vs - meanVals.Vs) / stdVals.Vs + 0.5);
 			int z3 = (int) (fabsf(hostData[i].Vt - meanVals.Vt) / stdVals.Vt + 0.5);
@@ -299,8 +302,8 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 
 		if (inTresh){
 			// write to intermediate data
-			int oldKey = hostKeyData[j - sameKeys + 1];
-			int curID = j - sameKeys + 1;
+			long long oldKey = hostKeyData[j - sameKeys + 1];
+			long long curID = j - sameKeys + 1;
 			meanVals.X = hostData[curID].X; meanVals.Y = hostData[curID].Y; meanVals.Z = hostData[curID].Z;
 			intermediate.push_back(meanVals);
 			intermediateKey.push_back(oldKey);
@@ -317,7 +320,7 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 		else if (isOptionA){
 			if (!isBinary){
 				ostringstream out;
-				for (int i = j - sameKeys + 1; i <= j; i++){
+				for (long long i = j - sameKeys + 1; i <= j; i++){
 					values_vec tmp = hostData[i];
 					out << tmp.X << " " << tmp.Y << " " << tmp.Z << " ";
 					out << hostKeyData[i] << " ";
@@ -326,7 +329,7 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 				finalOut << out.str();
 			}
 			else{
-				for (int i = j - sameKeys + 1; i <= j; i++){
+				for (long long i = j - sameKeys + 1; i <= j; i++){
 					finalIds.push_back(i);
 				}
 			}
@@ -336,11 +339,11 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 		// write to binary files
 		if (isBinary){
 			// Final
-			int finalSz = finalIds.size();
+			long long finalSz = finalIds.size();
 			char *Buffer = new char[28 * finalSz];
 			float *ptr = (float *) Buffer;
-			for (int i = 0; i < finalSz; i++){
-				int curID = finalIds[i];
+			for (long long i = 0; i < finalSz; i++){
+				long long curID = finalIds[i];
 				values_vec tmp = hostData[curID];
 				*(ptr++) = tmp.X; *(ptr++) = tmp.Y; *(ptr++) = tmp.Z;
 				*(ptr++) = *((float *) (&hostKeyData[curID]));
@@ -353,10 +356,10 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 			finalSz = intermediate.size();
 			Buffer = new char[32 * finalSz];
 			ptr = (float *) Buffer;
-			for (int i = 0; i < finalSz; i++){
+			for (long long i = 0; i < finalSz; i++){
 				values_vec tmp = intermediate[i];
 				*(ptr++) = tmp.X; *(ptr++) = tmp.Y; *(ptr++) = tmp.Z;
-				int newKey = intermediateKey[i] >> 3;
+				long long newKey = intermediateKey[i] >> 3;
 				*(ptr++) = *((float *) (&newKey));
 				*(ptr++) = tmp.Vr; *(ptr++) = tmp.Vs; *(ptr++) = tmp.Vt;
 				*(ptr++) = *((float *) (&intermediateKey[i]));
@@ -369,13 +372,13 @@ void NextReductionStep(int step, vector<values_vec> &hostData, thrust::host_vect
 	}
 }
 
-void Merge2SortedHalves(thrust::host_vector<int> &key, thrust::host_vector<int> &val, int begin, int end,
-	thrust::host_vector<int> &keySorted, thrust::host_vector<int> &valSorted, int beginSorted)
+void Merge2SortedHalves(thrust::host_vector<long long> &key, thrust::host_vector<long long> &val, long long begin, long long end,
+	thrust::host_vector<long long> &keySorted, thrust::host_vector<long long> &valSorted, long long beginSorted)
 {
-	int j = 0, k = 0;
-	int N = end - begin;
-	int N2 = N >> 1;
-	for (int i = N2; i < N; i++){
+	long long j = 0, k = 0;
+	long long N = end - begin;
+	long long N2 = N >> 1;
+	for (long long i = N2; i < N; i++){
 		if (j != N2){
 			while (key[begin + i] > key[begin + j]){
 				valSorted[beginSorted + k] = val[begin + j];
@@ -395,12 +398,12 @@ void Merge2SortedHalves(thrust::host_vector<int> &key, thrust::host_vector<int> 
 	}
 }
 
-void OptimizedReadFile(int N, ifstream &input, char delim, vector<values_vec> &hostData, thrust::host_vector<int> &hostKeyData)
+void OptimizedReadFile(long long N, ifstream &input, char delim, vector<values_vec> &hostData, thrust::host_vector<long long> &hostKeyData)
 {
 	char buf[256];
 	vector<values_vec>::iterator it = hostData.begin();
-	thrust::host_vector<int>::iterator itK = hostKeyData.begin();
-	for (int i = 0; i < N; i++){
+	thrust::host_vector<long long>::iterator itK = hostKeyData.begin();
+	for (long long i = 0; i < N; i++){
 		input.getline(buf, 256);
 		char *ch = buf;
 		(*it).X = atof(ch);
@@ -408,11 +411,25 @@ void OptimizedReadFile(int N, ifstream &input, char delim, vector<values_vec> &h
 		(*it).Y = atof(ch);
 		while (*ch++ != delim);
 		(*it).Z = atof(ch);
+		// new changes in input format
+		char comma = ',';
 		while (*ch++ != delim);
+		while (*ch++ != comma/*delim*/);
+		while (*ch++ != comma/*delim*/);
 		while (*ch++ != delim);
-		while (*ch++ != delim);
-		while (*ch++ != delim);
-		*itK = atoi(ch);
+		// conversion from binary view to int data 
+
+		//*itK = atoi(ch);
+		while (*ch != '1' && *ch != '0')ch++;
+		*itK = 0;
+		do{
+			(*itK) <<= 1;
+			if (*ch == '1')(*itK)++;
+			else if (*ch != '0')break;
+			ch++;
+		} while (*ch == '1' || *ch == '0');
+		cout << *itK << endl;
+
 		while (*ch++ != delim);
 		(*it).Vr = atof(ch);
 		while (*ch++ != delim);
@@ -427,24 +444,24 @@ void OptimizedReadFile(int N, ifstream &input, char delim, vector<values_vec> &h
 
 void ReductionOfFile(int x, ifstream &input, float &TotalTime, bool isOptionA, bool withGPU, bool isBinary, ofstream &finalOut, ofstream &timeOut, string pathInter = "")
 {
-	int N = 1 << (3 * x);
-	int N2 = N >> 1, N4 = N >> 2;
+	long long N = 1 << (3 * x);
+	long long N2 = N >> 1, N4 = N >> 2;
 	clock_t cpu_time = clock();
 	float allocationTime, readTime;
 	// allocate host data of values on CPU
 	std::vector<values_vec> hostData(N);
-	thrust::host_vector<int> hostKeyData(N);
-	thrust::host_vector<int> hostSortID(N);
+	thrust::host_vector<long long> hostKeyData(N);
+	thrust::host_vector<long long> hostSortID(N);
 
 	float totalSort = 0;
 	if (withGPU){
 		// additional memory for merging
-		thrust::host_vector<int> hostKeyData1(N);
-		thrust::host_vector<int> hostSortID1(N);
+		thrust::host_vector<long long> hostKeyData1(N);
+		thrust::host_vector<long long> hostSortID1(N);
 
 		// allocate thrust::device data on GPU
-		thrust::device_vector<int> devKeyData(N2);
-		thrust::device_vector<int> devSortID(N2);
+		thrust::device_vector<long long> devKeyData(N2);
+		thrust::device_vector<long long> devSortID(N2);
 		allocationTime = float(clock() - cpu_time) / CLOCKS_PER_SEC;
 		cout << "allocation Data time = " << allocationTime << std::endl;
 		if (isOptionA)timeOut << "allocation Data time = " << allocationTime << std::endl;
@@ -456,7 +473,7 @@ void ReductionOfFile(int x, ifstream &input, float &TotalTime, bool isOptionA, b
 		// Optimized read original file which have N records with delimiter = '\t' 
 		OptimizedReadFile(N, input, '\t', hostData, hostKeyData);
 		// init vec of IDs
-		for (int i = 0; i < N; i++)hostSortID[i] = i;
+		for (long long i = 0; i < N; i++)hostSortID[i] = i;
 
 		readTime = float(clock() - cpu_time) / CLOCKS_PER_SEC;
 		cout << "reading file time = " << readTime << std::endl;
@@ -543,7 +560,7 @@ void ReductionOfFile(int x, ifstream &input, float &TotalTime, bool isOptionA, b
 		// Optimized read original file which have N records with delimiter = '\t' 
 		OptimizedReadFile(N, input, '\t', hostData, hostKeyData);
 		// init vec of IDs
-		for (int i = 0; i < N; i++)hostSortID[i] = i;
+		for (long long i = 0; i < N; i++)hostSortID[i] = i;
 
 		readTime = float(clock() - cpu_time) / CLOCKS_PER_SEC;
 		cout << "reading file time = " << readTime << std::endl;
@@ -559,9 +576,9 @@ void ReductionOfFile(int x, ifstream &input, float &TotalTime, bool isOptionA, b
 	// First reduction step
 	//std::cout<<"start 1-st reduction step \n";
 	vector<values_vec> intermediate;
-	vector<int> intermediateKey;
+	vector<long long> intermediateKey;
 	vector<float> iterationTime;
-	int reducedRecs = 0, finalRecs = 0;
+	long long reducedRecs = 0, finalRecs = 0;
 	cpu_time = clock();
 	FirstReductionStep(hostData, hostSortID, hostKeyData, intermediate, intermediateKey, isBinary, finalOut, reducedRecs, isOptionA, pathInter);
 	iterationTime.push_back(float(clock() - cpu_time) / CLOCKS_PER_SEC);
@@ -613,7 +630,7 @@ void ReductionOfFile(int x, ifstream &input, float &TotalTime, bool isOptionA, b
 
 int main(int argc, char **argv)
 {
-	int x = 7;// degree of 8: N = 8^x
+	int x = 1;// degree of 8: N = 8^x
 	int NumOfFiles = 1;// number of input files in directory or number of iteration for one file
 	char pathToRoot[1024];// path to folder with input files
 	ofstream totalTimeOut("totalTime.txt");
